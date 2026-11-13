@@ -24,9 +24,16 @@ final class DashboardViewModel {
     private let mountService: MountServicing
     private let authService: AuthorizationServicing
     private let diskMonitor: DiskMonitoringService
+    private let healthService: DiskHealthServicing
 
     private(set) var disks: [DiskInfo] = []
-    var selectedDiskID: String?
+    var selectedDiskID: String? {
+        didSet {
+            if let disk = selectedDisk {
+                fetchHealth(for: disk)
+            }
+        }
+    }
 
     private(set) var backendEnvironment: BackendEnvironmentStatus
     private(set) var isScanning: Bool = false
@@ -40,6 +47,13 @@ final class DashboardViewModel {
     var activeAlert: DashboardAlertItem?
     var isShowingDiagnosticsSheet: Bool = false
     var diagnosticsSheetMode: DiagnosticsTab = .logs
+
+    // CrystalDiskInfo-style Health & Telemetry State
+    private(set) var diskHealthCache: [String: DiskHealthInfo] = [:]
+    private(set) var isLoadingHealth: Bool = false
+    private(set) var isInstallingSmartctl: Bool = false
+    private(set) var smartctlInstallProgress: String? = nil
+    var isShowingHealthSheet: Bool = false
 
     /// Retains verified `iomedia` identities across `ntfs-3g` remounts (`verifiedIdentities` in `guoquan/mountfs`).
     private var verifiedIdentities: [String: String] = [:]
@@ -74,6 +88,7 @@ final class DashboardViewModel {
         authService: AuthorizationServicing = AuthorizationService(),
         mountService: MountServicing? = nil,
         diskMonitor: DiskMonitoringService = DiskMonitoringService(),
+        healthService: DiskHealthServicing = DiskHealthService.shared,
         startMonitoringImmediately: Bool = true
     ) {
         self.settings = settings
@@ -87,6 +102,7 @@ final class DashboardViewModel {
             authService: authService
         )
         self.diskMonitor = diskMonitor
+        self.healthService = healthService
         self.backendEnvironment = backendService.inspectEnvironment(selectedBackend: settings.preferredBackend)
 
         if startMonitoringImmediately {
@@ -564,6 +580,65 @@ final class DashboardViewModel {
                 trigger: nil
             )
             center.add(request)
+        }
+    }
+
+    // MARK: - CrystalDiskInfo Health & Telemetry Operations
+
+    func health(for disk: DiskInfo) -> DiskHealthInfo? {
+        diskHealthCache[disk.deviceIdentifier]
+    }
+
+    func fetchHealth(for disk: DiskInfo) {
+        guard !isLoadingHealth else { return }
+        isLoadingHealth = true
+        let service = healthService
+
+        Task {
+            let info = await service.inspectHealth(for: disk)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.diskHealthCache[disk.deviceIdentifier] = info
+                self.isLoadingHealth = false
+            }
+        }
+    }
+
+    func installSmartmontools() {
+        guard !isInstallingSmartctl else { return }
+        isInstallingSmartctl = true
+        smartctlInstallProgress = "Starting smartmontools installation via Homebrew…"
+        let service = healthService
+
+        Task {
+            do {
+                _ = try await service.installSmartmontools { [weak self] line in
+                    Task { @MainActor [weak self] in
+                        self?.smartctlInstallProgress = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.isInstallingSmartctl = false
+                    self.smartctlInstallProgress = nil
+                    if let disk = self.selectedDisk {
+                        self.fetchHealth(for: disk)
+                    }
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.isInstallingSmartctl = false
+                    self.smartctlInstallProgress = nil
+                    self.activeAlert = DashboardAlertItem(
+                        title: "smartmontools Installation Failed",
+                        message: error.localizedDescription,
+                        detailedLog: (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String,
+                        offerFullDiskAccess: false,
+                        offerInstallCheck: false
+                    )
+                }
+            }
         }
     }
 }

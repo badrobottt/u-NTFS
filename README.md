@@ -8,6 +8,12 @@
 
 - **Real-Time Disk Discovery**: Automatically detects connected external storage devices using `DiskArbitration`, `IOKit`, and kernel mount table inspection (`getmntinfo`).
 - **Genuine Finder Read/Write Integration**: Remounts read-only NTFS volumes in Read/Write mode so you can create, copy, move, rename, and delete files directly in macOS Finder.
+- **CrystalDiskInfo Telemetry & S.M.A.R.T. Inspector**:
+  - Live Celsius & Fahrenheit disk temperature readings.
+  - Overall health status indicator (`GOOD`, `CAUTION`, `BAD`) with SSD life percentage.
+  - Detailed hardware specs: Serial number, firmware revision, interface protocol (USB/NVMe/SATA), sector size, and media type.
+  - Deep S.M.A.R.T. attributes table with real-time sensor and lifetime statistics via `smartmontools`.
+- **Non-NTFS Drive Visibility Toggle**: Option to inspect non-NTFS external drives (exFAT, FAT32, APFS) while protecting non-NTFS volumes from NTFS driver operations.
 - **Multi-Backend Architecture**:
   - **macFUSE + NTFS-3G (Kernel)** — Default production backend (`/Library/Filesystems/macfuse.fs`).
   - **Apple FSKit + NTFS-3G (Experimental)** — User-space FSKit integration (`-o backend=fskit`, requires macOS 15.4+).
@@ -21,6 +27,7 @@
 - **Desktop Dashboard & Menu Bar Extra**:
   - Detailed volume inspection (capacity usage, BSD device identifier, UUID, filesystem type, connection bus, S.M.A.R.T. status, and mount point).
   - Quick one-click **Mount Writable**, **Remount Read-Only**, **Unmount**, **Eject**, and **Open in Finder** actions from both the main window and the macOS menu bar.
+- **Automatic Driver & Tool Installer**: One-click in-app background installation for Homebrew, macFUSE, ntfs-3g-mac, and smartmontools.
 - **Touch ID / Admin Authorization**: Supports biometric confirmation (`LocalAuthentication`) and standard macOS privilege elevation without ever storing passwords.
 - **Built-in Diagnostics & Self-Test Suite**: Includes an interactive 7-stage verification suite and live `OSLog` diagnostic viewer.
 
@@ -36,6 +43,11 @@ brew install gromgit/fuse/ntfs-3g-mac
 ```
 
 > **Note for Apple Silicon Macs:** After installing `macFUSE`, macOS may prompt you to approve the system extension in **System Settings → Privacy & Security**.
+
+Optional for deep S.M.A.R.T. and live temperature sensors:
+```bash
+brew install smartmontools
+```
 
 ---
 
@@ -59,31 +71,43 @@ The project follows a clean **MVVM + Service** architecture using Swift Concurre
 ```text
 u-NTFS/
 ├── Filesystem/
-│   ├── MountFSEngine.swift        # IOKit media identity, getmntinfo reader, NTFS boot-sector validator, device lock
-│   ├── MountFSSelfTests.swift     # Automated 7-stage safety & regression self-test suite
-│   ├── NTFSBackendAdapter.swift   # Backend protocol & NTFS-3G / macFUSE / FSKit adapter
-│   └── mountfs.sh                 # Reference Bash 3.2 mount script
+│   ├── mountfs.sh                 # Reference shell implementation from guoquan/mountfs
+│   ├── MountFSEngine.swift         # Core disk validation, IOKit registry pinning, and lock engine
+│   ├── MountFSSelfTests.swift      # Self-test validation suite for safety invariants
+│   └── NTFSBackendAdapter.swift    # Driver path resolution and mount option builder
 ├── Models/
-│   ├── DiskInfo.swift             # Volume model, capacity metrics, and DiskMetadata filter
-│   ├── FilesystemBackend.swift    # Backend types (Kernel, FSKit, FUSE-T) & environment readiness status
-│   └── VolumeStatus.swift         # Volume lifecycle states & structured MountError definitions
+│   ├── DiskHealthInfo.swift        # CrystalDiskInfo health, temperature, and SMART attributes model
+│   ├── DiskInfo.swift              # Volume metadata and presentation model
+│   ├── FilesystemBackend.swift     # Backend driver status and environment inspection
+│   └── VolumeStatus.swift          # Transaction steps, mount state, and health warnings
 ├── Services/
-│   ├── AuthorizationService.swift # Touch ID (LocalAuthentication) & privileged command execution
-│   ├── DiskMonitoringService.swift# Real-time DiskArbitration + NSWorkspace volume observer
-│   ├── LoggingService.swift       # Structured OSLog + in-memory diagnostic log buffer
-│   ├── MountService.swift         # Orchestrates mount, remount, unmount, eject, and fallback recovery
-│   ├── NTFSBackendService.swift   # Detects installed NTFS-3G binary, macFUSE, FUSE-T, and FSKit support
-│   └── VolumeInformationService.swift # Queries diskutil plist metadata and kernel mount state
+│   ├── AuthorizationService.swift  # Privileged Helper Tool & Touch ID authorization
+│   ├── DiskHealthService.swift     # Multi-tier telemetry (IOKit + diskutil + smartctl)
+│   ├── DiskMonitoringService.swift # Real-time DiskArbitration event stream
+│   ├── LoggingService.swift        # Centralized OSLog and in-memory audit logs
+│   ├── MountService.swift          # Transactional read/write remounting and recovery engine
+│   ├── NTFSBackendService.swift    # Backend detection and automated driver installer
+│   └── VolumeInformationService.swift # diskutil plist parser and volume discovery
 ├── ViewModels/
-│   ├── DashboardViewModel.swift   # Main state coordinator for disks, actions, self-tests, and logs
-│   └── SettingsViewModel.swift    # UserDefaults persistence & SMAppService Launch at Login
+│   ├── DashboardViewModel.swift    # Central UI coordinator
+│   └── SettingsViewModel.swift     # Persistent user preferences
 └── Views/
-    ├── DashboardView.swift        # Split-view main window with sidebar, toolbar, and status banners
-    ├── DiskDetailView.swift       # Detailed volume metrics, action controls, and technical inspector
-    ├── MenuBarView.swift          # Compact macOS MenuBarExtra popover interface
-    ├── SettingsView.swift         # Driver status, preferences, self-tests, and diagnostic console
-    └── StatusComponents.swift     # Reusable status badges, capacity bars, and UI components
+    ├── DashboardView.swift         # Split-view main window with sidebar and toolbar
+    ├── DiskDetailView.swift        # Detailed volume metrics, actions, and inspector
+    ├── DiskHealthView.swift        # CrystalDiskInfo-style health, temperature, and SMART telemetry view
+    ├── MenuBarView.swift           # Compact macOS MenuBarExtra popover interface
+    ├── SettingsView.swift          # Driver status, preferences, and self-tests
+    └── StatusComponents.swift      # Reusable status badges and diagnostic sheets
 ```
+
+---
+
+## 💖 Supporting & Sponsoring
+
+If you find **u-NTFS** useful for your daily workflow, consider sponsoring the project to support continuous development and maintenance!
+
+- Click the **Sponsor** button at the top of the [GitHub repository](https://github.com/badrobottt/u-NTFS).
+- GitHub Sponsors: [@badrobottt](https://github.com/sponsors/badrobottt)
 
 ---
 

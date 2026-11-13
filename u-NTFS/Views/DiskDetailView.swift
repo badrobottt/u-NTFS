@@ -26,6 +26,8 @@ struct DiskDetailView: View {
 
                 StorageCapacityCard(disk: disk)
 
+                crystalDiskInfoHealthCard
+
                 if !disk.healthWarnings.isEmpty {
                     warningsSection
                 }
@@ -33,6 +35,48 @@ struct DiskDetailView: View {
                 metadataSection
             }
             .padding(22)
+        }
+        .onAppear {
+            viewModel.fetchHealth(for: disk)
+        }
+        .onChange(of: disk.deviceIdentifier) { _, _ in
+            viewModel.fetchHealth(for: disk)
+        }
+        .sheet(isPresented: $viewModel.isShowingHealthSheet) {
+            if let health = viewModel.health(for: disk) {
+                VStack(spacing: 0) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("CrystalDiskInfo Telemetry")
+                                .font(.headline)
+                            Text("\(disk.name) (/dev/\(disk.deviceIdentifier))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Done") {
+                            viewModel.isShowingHealthSheet = false
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(16)
+
+                    Divider()
+
+                    ScrollView {
+                        DiskHealthView(
+                            health: health,
+                            isLoading: viewModel.isLoadingHealth,
+                            onRefresh: { viewModel.fetchHealth(for: disk) },
+                            onInstallSmartctl: { viewModel.installSmartmontools() },
+                            isInstallingSmartctl: viewModel.isInstallingSmartctl,
+                            installProgressText: viewModel.smartctlInstallProgress
+                        )
+                        .padding(18)
+                    }
+                }
+                .frame(minWidth: 720, minHeight: 520)
+            }
         }
         .confirmationDialog(
             "Safely eject \(disk.name)?",
@@ -235,5 +279,99 @@ struct DiskDetailView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // MARK: - CrystalDiskInfo Health & Temperature Card
+
+    private var crystalDiskInfoHealthCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Disk Health & Temperature (CrystalDiskInfo)", systemImage: "waveform.path.ecg")
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    viewModel.isShowingHealthSheet = true
+                } label: {
+                    Label("Inspect S.M.A.R.T.", systemImage: "sparkles")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            if let health = viewModel.health(for: disk) {
+                HStack(spacing: 12) {
+                    // Mini Health Badge
+                    HStack(spacing: 8) {
+                        Image(systemName: health.healthGrade.isGood ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                            .font(.title3)
+                            .foregroundStyle(health.healthGrade.isGood ? .blue : .orange)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Health Status")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(health.healthGrade.title)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(health.healthGrade.isGood ? .blue : .orange)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
+                    // Mini Temperature Badge
+                    HStack(spacing: 8) {
+                        Image(systemName: "thermometer.medium")
+                            .font(.title3)
+                            .foregroundStyle(health.temperature.celsius != nil ? .teal : .secondary)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Temperature")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(health.temperature.displayString)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(health.temperature.celsius != nil ? .teal : .secondary)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
+                    // Media Type
+                    HStack(spacing: 8) {
+                        Image(systemName: health.mediaType == .ssd ? "internaldrive.fill" : "externaldrive.fill")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Media Type")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(health.mediaType.rawValue)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
+                    Spacer()
+                }
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading disk health and telemetry…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+            }
+        }
+        .padding(16)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
     }
 }
