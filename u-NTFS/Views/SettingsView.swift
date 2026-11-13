@@ -94,11 +94,43 @@ struct SettingsView: View {
                 }
 
                 HStack {
+                    if !viewModel.backendEnvironment.isSelectedBackendReady {
+                        Button {
+                            viewModel.installDriversAutomatically()
+                        } label: {
+                            Label(
+                                viewModel.isInstallingDrivers ? "Installing Drivers…" : "Install Drivers Automatically",
+                                systemImage: "arrow.down.circle.fill"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isInstallingDrivers)
+
+                        Button {
+                            viewModel.installDriversInTerminal()
+                        } label: {
+                            Label("Install in Terminal", systemImage: "terminal")
+                        }
+                        .disabled(viewModel.isInstallingDrivers)
+                    }
+
                     Button("Refresh Driver Status") {
                         viewModel.refreshBackendStatus()
                     }
+                    .disabled(viewModel.isInstallingDrivers)
+
                     Button("Open Full Disk Access…") {
                         viewModel.openFullDiskAccess()
+                    }
+                }
+
+                if let progress = viewModel.driverInstallProgressText {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(progress)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

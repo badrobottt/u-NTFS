@@ -133,6 +133,14 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             BackendReadinessCard(
                 status: viewModel.backendEnvironment,
+                isInstallingDrivers: viewModel.isInstallingDrivers,
+                installProgressText: viewModel.driverInstallProgressText,
+                onInstallDrivers: {
+                    viewModel.installDriversAutomatically()
+                },
+                onInstallInTerminal: {
+                    viewModel.installDriversInTerminal()
+                },
                 onCheckInstallation: {
                     viewModel.runInstallationCheckAndShowSheet()
                 },

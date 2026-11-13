@@ -5,6 +5,8 @@ import AppKit
 protocol NTFSBackendServicing: Sendable {
     nonisolated func inspectEnvironment(selectedBackend: FilesystemBackendType) -> BackendEnvironmentStatus
     nonisolated func generateInstallationDiagnosis(selectedBackend: FilesystemBackendType) -> String
+    nonisolated func findHomebrewExecutable() -> String?
+    nonisolated func installMissingDrivers(selectedBackend: FilesystemBackendType) -> Result<String, Error>
     func openFullDiskAccessSettings()
     func openLoginItemsSettings()
 }
@@ -89,6 +91,122 @@ final class NTFSBackendService: NTFSBackendServicing, @unchecked Sendable {
         lines.append("Full Disk Access note: If mounting fails with 'Operation not permitted', add \(status.ntfs3gPath ?? "/opt/homebrew/bin/ntfs-3g") in System Settings → Privacy & Security → Full Disk Access.")
         lines.append("Safety policy: Mounts with -o rw,norecover,allow_other,default_permissions (never clears dirty journals or hibernation files automatically).")
         return lines.joined(separator: "\n")
+    }
+
+    nonisolated func findHomebrewExecutable() -> String? {
+        let fm = FileManager.default
+        let candidates = [
+            "/opt/homebrew/bin/brew",
+            "/usr/local/bin/brew"
+        ]
+        return candidates.first { fm.isExecutableFile(atPath: $0) }
+    }
+
+    nonisolated func installMissingDrivers(selectedBackend: FilesystemBackendType) -> Result<String, Error> {
+        let initialStatus = inspectEnvironment(selectedBackend: selectedBackend)
+        var logLines: [String] = []
+        logLines.append("=== u-NTFS Automatic Driver Installer ===")
+        logLines.append("Target Backend: \(selectedBackend.displayName)")
+
+        guard let brewPath = findHomebrewExecutable() else {
+            let msg = "Homebrew ('brew') was not found at /opt/homebrew/bin/brew or /usr/local/bin/brew.\nPlease install Homebrew from https://brew.sh first, or use 'Install in Terminal' to run the setup."
+            logLines.append("Error: \(msg)")
+            return .failure(NSError(
+                domain: "uNTFS.DriverInstaller",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: msg]
+            ))
+        }
+
+        logLines.append("Using Homebrew: \(brewPath)")
+
+        let userHome = NSHomeDirectory()
+        let userEnv: [String: String] = [
+            "PATH": "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": userHome,
+            "LANG": "en_US.UTF-8",
+            "NONINTERACTIVE": "1",
+            "HOMEBREW_NO_AUTO_UPDATE": "1"
+        ]
+
+        // 1. Install macFUSE or FUSE-T if missing
+        if selectedBackend == .fuseT && !initialStatus.fuseTInstalled {
+            logLines.append("\n[1/2] Installing FUSE-T (brew install --cask fuse-t)...")
+            let tapRes = MountFSEngine.runBoundedCommand(
+                brewPath,
+                ["tap", "macos-fuse-t/homebrew-cask"],
+                environment: userEnv,
+                mergeErrors: true,
+                timeout: 180
+            )
+            logLines.append(tapRes.text)
+
+            let caskRes = MountFSEngine.runBoundedCommand(
+                brewPath,
+                ["install", "--cask", "fuse-t"],
+                environment: userEnv,
+                mergeErrors: true,
+                timeout: 600
+            )
+            logLines.append(caskRes.text)
+            if caskRes.status != 0 {
+                return .failure(NSError(
+                    domain: "uNTFS.DriverInstaller",
+                    code: Int(caskRes.status),
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to install FUSE-T via Homebrew.\n\n\(logLines.joined(separator: "\n"))"]
+                ))
+            }
+        } else if !initialStatus.macFUSEInstalled {
+            logLines.append("\n[1/2] Installing macFUSE (brew install --cask macfuse)...")
+            let caskRes = MountFSEngine.runBoundedCommand(
+                brewPath,
+                ["install", "--cask", "macfuse"],
+                environment: userEnv,
+                mergeErrors: true,
+                timeout: 600
+            )
+            logLines.append(caskRes.text)
+            if caskRes.status != 0 {
+                return .failure(NSError(
+                    domain: "uNTFS.DriverInstaller",
+                    code: Int(caskRes.status),
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to install macFUSE via Homebrew. Note: Cask installation may require administrator password in Terminal.\n\n\(logLines.joined(separator: "\n"))"]
+                ))
+            }
+        } else {
+            logLines.append("\n[1/2] Filesystem bundle already installed.")
+        }
+
+        // 2. Install ntfs-3g-mac if missing
+        let afterBundleStatus = inspectEnvironment(selectedBackend: selectedBackend)
+        if !afterBundleStatus.hasNTFS3G {
+            logLines.append("\n[2/2] Installing ntfs-3g-mac (brew install gromgit/fuse/ntfs-3g-mac)...")
+            let ntfsRes = MountFSEngine.runBoundedCommand(
+                brewPath,
+                ["install", "gromgit/fuse/ntfs-3g-mac"],
+                environment: userEnv,
+                mergeErrors: true,
+                timeout: 600
+            )
+            logLines.append(ntfsRes.text)
+            if ntfsRes.status != 0 {
+                return .failure(NSError(
+                    domain: "uNTFS.DriverInstaller",
+                    code: Int(ntfsRes.status),
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to install ntfs-3g-mac via Homebrew.\n\n\(logLines.joined(separator: "\n"))"]
+                ))
+            }
+        } else {
+            logLines.append("\n[2/2] ntfs-3g executable already installed at \(afterBundleStatus.ntfs3gPath ?? "").")
+        }
+
+        let finalStatus = inspectEnvironment(selectedBackend: selectedBackend)
+        logLines.append("\n=== Installation Summary ===")
+        logLines.append("ntfs-3g: \(finalStatus.ntfs3gPath ?? "Not Found")")
+        logLines.append("macFUSE: \(finalStatus.macFUSEInstalled ? "Installed" : "Not Installed")")
+        logLines.append("Status: \(finalStatus.readinessDescription)")
+
+        return .success(logLines.joined(separator: "\n"))
     }
 
     func openFullDiskAccessSettings() {

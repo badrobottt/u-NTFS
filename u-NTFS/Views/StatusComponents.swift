@@ -144,6 +144,10 @@ struct TransactionProgressBanner: View {
 /// Banner displaying driver readiness (`ntfs-3g` + `macFUSE` / `FSKit`) and quick setup actions.
 struct BackendReadinessCard: View {
     let status: BackendEnvironmentStatus
+    let isInstallingDrivers: Bool
+    let installProgressText: String?
+    let onInstallDrivers: () -> Void
+    let onInstallInTerminal: () -> Void
     let onCheckInstallation: () -> Void
     let onOpenFullDiskAccess: () -> Void
 
@@ -152,22 +156,37 @@ struct BackendReadinessCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: status.isSelectedBackendReady ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(status.isSelectedBackendReady ? .green : .orange)
-                    .font(.title3)
+                if isInstallingDrivers {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: status.isSelectedBackendReady ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(status.isSelectedBackendReady ? .green : .orange)
+                        .font(.title3)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(status.isSelectedBackendReady ? "NTFS Read/Write Engine Ready" : "NTFS Driver Setup Required")
+                    Text(isInstallingDrivers ? "Installing NTFS Drivers…" : (status.isSelectedBackendReady ? "NTFS Read/Write Engine Ready" : "NTFS Driver Setup Required"))
                         .font(.subheadline.weight(.semibold))
-                    Text(status.readinessDescription)
+                    Text(installProgressText ?? status.readinessDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
+                if !status.isSelectedBackendReady {
+                    Button(action: onInstallDrivers) {
+                        Label(isInstallingDrivers ? "Installing…" : "Install Drivers", systemImage: "arrow.down.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isInstallingDrivers)
+                }
+
                 Button("Check Installation", action: onCheckInstallation)
                     .controlSize(.small)
+                    .disabled(isInstallingDrivers)
 
                 Button("Full Disk Access", action: onOpenFullDiskAccess)
                     .controlSize(.small)
@@ -187,7 +206,12 @@ struct BackendReadinessCard: View {
                         NSPasteboard.general.setString(status.homebrewInstallCommand, forType: .string)
                         copiedCommand = true
                     } label: {
-                        Label(copiedCommand ? "Copied" : "Copy Homebrew Command", systemImage: copiedCommand ? "checkmark" : "doc.on.doc")
+                        Label(copiedCommand ? "Copied" : "Copy Command", systemImage: copiedCommand ? "checkmark" : "doc.on.doc")
+                    }
+                    .controlSize(.small)
+
+                    Button(action: onInstallInTerminal) {
+                        Label("Install in Terminal", systemImage: "terminal")
                     }
                     .controlSize(.small)
                 }

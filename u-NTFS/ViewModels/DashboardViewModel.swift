@@ -31,6 +31,8 @@ final class DashboardViewModel {
     private(set) var backendEnvironment: BackendEnvironmentStatus
     private(set) var isScanning: Bool = false
     private(set) var isBusy: Bool = false
+    private(set) var isInstallingDrivers: Bool = false
+    private(set) var driverInstallProgressText: String?
     private(set) var activeDeviceID: String?
     private(set) var activeTransactionStep: MountTransactionStep?
     private(set) var statusSummary: String = "Scanning volumes…"
@@ -401,6 +403,85 @@ final class DashboardViewModel {
         logging.log("Completed NTFS driver & backend installation check", level: .info, category: "Diagnostics", details: report)
         diagnosticsSheetMode = .installation
         isShowingDiagnosticsSheet = true
+    }
+
+    func installDriversAutomatically() {
+        guard !isInstallingDrivers else { return }
+
+        if backendService.findHomebrewExecutable() == nil {
+            installDriversInTerminal()
+            return
+        }
+
+        isInstallingDrivers = true
+        driverInstallProgressText = "Installing macFUSE & ntfs-3g-mac via Homebrew…"
+        statusSummary = "Installing NTFS drivers via Homebrew…"
+        let selected = settings.preferredBackend
+        let service = backendService
+        logging.log("Starting automatic NTFS driver installation for \(selected.displayName)", level: .notice, category: "Installer")
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                service.installMissingDrivers(selectedBackend: selected)
+            }.value
+
+            self.isInstallingDrivers = false
+            self.driverInstallProgressText = nil
+            self.refreshBackendStatus()
+
+            switch result {
+            case .success(let logOutput):
+                self.logging.recordOperationOutput(logOutput)
+                self.logging.log("Successfully installed NTFS drivers via Homebrew", level: .notice, category: "Installer", details: logOutput)
+                self.statusSummary = self.backendEnvironment.isSelectedBackendReady
+                    ? "NTFS drivers installed and ready"
+                    : "Driver installation finished — verify status"
+                self.postNotificationIfEnabled(
+                    title: "NTFS Drivers Installed",
+                    body: "macFUSE and ntfs-3g installation completed."
+                )
+            case .failure(let error):
+                let details = error.localizedDescription
+                self.logging.recordOperationOutput(details)
+                self.logging.log("Automatic driver installation failed; offering Terminal fallback", level: .warning, category: "Installer", details: details)
+                self.statusSummary = "Automatic install needs Terminal authorization"
+                self.installDriversInTerminal()
+            }
+        }
+    }
+
+    func installDriversInTerminal() {
+        let cmd = backendEnvironment.homebrewInstallCommand
+        let scriptContent = """
+        #!/bin/bash
+        clear
+        echo "======================================================"
+        echo "  u-NTFS Automatic Driver Setup (macFUSE + ntfs-3g)"
+        echo "======================================================"
+        echo ""
+        if ! command -v brew >/dev/null 2>&1 && [ ! -x /opt/homebrew/bin/brew ] && [ ! -x /usr/local/bin/brew ]; then
+            echo "Homebrew is not installed. Installing Homebrew first..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        fi
+        export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+        echo "Running: \(cmd)"
+        echo ""
+        \(cmd)
+        echo ""
+        echo "======================================================"
+        echo "  Setup finished! You can now return to u-NTFS"
+        echo "  and click 'Refresh Driver Status'."
+        echo "======================================================"
+        """
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("u-ntfs-install-drivers.command")
+        do {
+            try scriptContent.write(to: tempURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempURL.path)
+            NSWorkspace.shared.open(tempURL)
+            logging.log("Launched interactive driver installer in Terminal.app", level: .info, category: "Installer")
+        } catch {
+            logging.log("Failed to launch Terminal installer script: \(error.localizedDescription)", level: .error, category: "Installer")
+        }
     }
 
     // MARK: - Error Handling & Notifications
