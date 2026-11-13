@@ -106,8 +106,10 @@ u-NTFS/
 
 If you find **u-NTFS** useful for your daily workflow, consider sponsoring the project to support continuous development and maintenance!
 
-- Click the **Sponsor** button at the top of the [GitHub repository](https://github.com/badrobottt/u-NTFS).
-- GitHub Sponsors: [@badrobottt](https://github.com/sponsors/badrobottt)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-badrobottt-yellow.svg?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/badrobottt)
+
+- **Buy Me a Coffee**: [buymeacoffee.com/badrobottt](https://buymeacoffee.com/badrobottt)
+- **GitHub Sponsors**: [@badrobottt](https://github.com/sponsors/badrobottt)
 
 ---
 

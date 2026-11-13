@@ -2,8 +2,5 @@
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
 
 github: [badrobottt]
-# patreon: your_patreon_username
-# ko_fi: your_kofi_username
-# buy_me_a_coffee: your_buymeacoffee_username
-# polar: your_polar_username
-# custom: ['https://www.paypal.me/yourusername']
+buy_me_a_coffee: badrobottt
+custom: ['https://buymeacoffee.com/badrobottt']
