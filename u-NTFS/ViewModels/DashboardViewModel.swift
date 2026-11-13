@@ -26,6 +26,25 @@ final class DashboardViewModel {
     private let diskMonitor: DiskMonitoringService
     private let healthService: DiskHealthServicing
 
+    // System Readiness & Permissions Audit State
+    let readinessService: SystemReadinessServicing
+    private(set) var readinessItems: [ReadinessCheckItem] = []
+    var isShowingReadinessSheet: Bool = false
+
+    var overallReadinessStatus: ReadinessStatus {
+        if readinessItems.contains(where: { if case .blocked = $0.status { return true } else { return false } }) {
+            return .blocked("Action Required")
+        }
+        if readinessItems.contains(where: { if case .notInstalled = $0.status { return true } else { return false } }) {
+            return .notInstalled("Drivers Missing")
+        }
+        if readinessItems.contains(where: { if case .warning = $0.status { return true } else { return false } }) {
+            return .warning("Attention Needed")
+        }
+        return .ready
+    }
+
+    private var allDisks: [DiskInfo] = []
     private(set) var disks: [DiskInfo] = []
     var selectedDiskID: String? {
         didSet {
@@ -54,6 +73,12 @@ final class DashboardViewModel {
     private(set) var isInstallingSmartctl: Bool = false
     private(set) var smartctlInstallProgress: String? = nil
     var isShowingHealthSheet: Bool = false
+
+    // NTFS Disk Formatting State
+    private let formatService: DiskFormatServicing
+    private(set) var isFormattingDisk: Bool = false
+    private(set) var formatProgressText: String? = nil
+    var isShowingFormatSheet: Bool = false
 
     /// Retains verified `iomedia` identities across `ntfs-3g` remounts (`verifiedIdentities` in `guoquan/mountfs`).
     private var verifiedIdentities: [String: String] = [:]
@@ -89,6 +114,8 @@ final class DashboardViewModel {
         mountService: MountServicing? = nil,
         diskMonitor: DiskMonitoringService = DiskMonitoringService(),
         healthService: DiskHealthServicing = DiskHealthService.shared,
+        formatService: DiskFormatServicing = DiskFormatService.shared,
+        readinessService: SystemReadinessServicing = SystemReadinessService.shared,
         startMonitoringImmediately: Bool = true
     ) {
         self.settings = settings
@@ -103,7 +130,11 @@ final class DashboardViewModel {
         )
         self.diskMonitor = diskMonitor
         self.healthService = healthService
+        self.formatService = formatService
+        self.readinessService = readinessService
         self.backendEnvironment = backendService.inspectEnvironment(selectedBackend: settings.preferredBackend)
+
+        auditSystemReadiness()
 
         if startMonitoringImmediately {
             startMonitoring()
@@ -137,6 +168,7 @@ final class DashboardViewModel {
 
     func refreshAll() {
         refreshBackendStatus()
+        auditSystemReadiness()
         refreshDisks(triggerAutoMountIfNeeded: true)
     }
 
@@ -152,12 +184,12 @@ final class DashboardViewModel {
         let currentIdentities = verifiedIdentities
         let generation = scanGeneration
         let service = volumeService
-        let includeNonNTFS = settings.showNonNTFSVolumes
 
         Task.detached(priority: .utility) {
+            // Always discover all external partitions so UI filtering happens instantaneously (0ms)
             let scanResult = service.scanExternalNTFSVolumes(
                 verifiedIdentities: currentIdentities,
-                includeNonNTFS: includeNonNTFS
+                includeNonNTFS: true
             )
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -165,24 +197,9 @@ final class DashboardViewModel {
                 guard !self.isBusy, generation == self.scanGeneration else { return }
 
                 if let scanResult {
-                    self.disks = scanResult.disks
+                    self.allDisks = scanResult.disks
                     self.logging.recordScanReport(scanResult.report)
-                    if self.selectedDiskID == nil || !self.disks.contains(where: { $0.id == self.selectedDiskID }) {
-                        self.selectedDiskID = self.disks.first?.id
-                    }
-                    if self.disks.isEmpty {
-                        self.statusSummary = self.settings.showNonNTFSVolumes
-                            ? "No external drives connected"
-                            : "No external NTFS drives connected"
-                    } else {
-                        let ntfsCount = self.disks.filter { $0.isNTFS }.count
-                        let nonNTFSCount = self.disks.count - ntfsCount
-                        if nonNTFSCount > 0 {
-                            self.statusSummary = "\(ntfsCount) NTFS, \(nonNTFSCount) other volume(s) · \(self.writableCount) writable"
-                        } else {
-                            self.statusSummary = "\(self.disks.count) external NTFS volume(s) · \(self.writableCount) writable"
-                        }
-                    }
+                    self.applyDiskFilter()
 
                     if triggerAutoMountIfNeeded && self.settings.autoMountNTFS && self.settings.defaultMountWritable {
                         self.evaluateAutoMountCandidates()
@@ -191,6 +208,42 @@ final class DashboardViewModel {
                     self.statusSummary = "Cannot read disk information — retry Refresh"
                     self.logging.log("diskutil list -plist failed or returned unreadable data", level: .warning, category: "Scanner")
                 }
+            }
+        }
+    }
+
+    /// Instantaneously updates the visible disk list based on the user's non-NTFS preference without slow diskutil rescans.
+    func applyDiskFilter() {
+        if settings.showNonNTFSVolumes {
+            disks = allDisks
+        } else {
+            disks = allDisks.filter(\.isNTFS)
+        }
+        updateStatusSummary()
+
+        if selectedDiskID == nil || !disks.contains(where: { $0.id == selectedDiskID }) {
+            selectedDiskID = disks.first?.id
+        }
+    }
+
+    /// Toggles showing non-NTFS external volumes with instant UI feedback.
+    func toggleShowNonNTFS(_ show: Bool) {
+        settings.showNonNTFSVolumes = show
+        applyDiskFilter()
+    }
+
+    private func updateStatusSummary() {
+        if disks.isEmpty {
+            statusSummary = settings.showNonNTFSVolumes
+                ? "No external drives connected"
+                : "No external NTFS drives connected"
+        } else {
+            let ntfsCount = disks.filter(\.isNTFS).count
+            let nonNTFSCount = disks.count - ntfsCount
+            if nonNTFSCount > 0 {
+                statusSummary = "\(ntfsCount) NTFS, \(nonNTFSCount) other volume(s) · \(writableCount) writable"
+            } else {
+                statusSummary = "\(disks.count) external NTFS volume(s) · \(writableCount) writable"
             }
         }
     }
@@ -437,6 +490,7 @@ final class DashboardViewModel {
 
     func runInstallationCheckAndShowSheet() {
         refreshBackendStatus()
+        auditSystemReadiness()
         let report = generateInstallationDiagnosisReport()
         logging.recordOperationOutput(report)
         logging.log("Completed NTFS driver & backend installation check", level: .info, category: "Diagnostics", details: report)
@@ -467,6 +521,7 @@ final class DashboardViewModel {
             self.isInstallingDrivers = false
             self.driverInstallProgressText = nil
             self.refreshBackendStatus()
+            self.auditSystemReadiness()
 
             switch result {
             case .success(let logOutput):
@@ -510,7 +565,7 @@ final class DashboardViewModel {
         echo "======================================================"
         echo "  Setup finished! You can now return to u-NTFS"
         echo "  and click 'Refresh Driver Status'."
-        echo "======================================================"
+        echo "======================================================\n"
         """
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("u-ntfs-install-drivers.command")
         do {
@@ -639,6 +694,103 @@ final class DashboardViewModel {
                     )
                 }
             }
+        }
+    }
+
+    // MARK: - NTFS Disk Formatting Operations
+
+    func formatDiskAsNTFS(
+        disk: DiskInfo,
+        volumeLabel: String,
+        quickFormat: Bool,
+        wholeDiskErase: Bool,
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+    ) {
+        guard !isFormattingDisk, !isBusy else { return }
+        isFormattingDisk = true
+        formatProgressText = "Preparing to format '\(disk.name)' as NTFS…"
+        let service = formatService
+        let targetLabel = volumeLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "UNTFS" : volumeLabel
+
+        logging.log("Starting NTFS format on /dev/\(disk.deviceIdentifier) (wholeDisk=\(wholeDiskErase), label=\(targetLabel))", level: .info, category: "Format")
+
+        Task {
+            let result = await service.formatAsNTFS(
+                disk: disk,
+                volumeLabel: targetLabel,
+                quickFormat: quickFormat,
+                wholeDiskErase: wholeDiskErase
+            )
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isFormattingDisk = false
+                self.formatProgressText = nil
+
+                switch result {
+                case .success(let report):
+                    self.logging.log("NTFS format succeeded: \(report)", level: .info, category: "Format")
+                    self.statusSummary = "Successfully formatted as NTFS (\(targetLabel))"
+                    self.postNotificationIfEnabled(
+                        title: "Format Complete",
+                        body: "Volume '\(targetLabel)' was successfully formatted as NTFS."
+                    )
+                    self.refreshDisks()
+                    completion?(true)
+
+                case .failure(let error):
+                    let message = error.localizedDescription
+                    self.logging.log("NTFS format failed for \(disk.name): \(message)", level: .error, category: "Format")
+                    self.activeAlert = DashboardAlertItem(
+                        title: "NTFS Formatting Failed",
+                        message: message,
+                        detailedLog: (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String,
+                        offerFullDiskAccess: message.contains("Operation not permitted") || message.contains("Permission denied"),
+                        offerInstallCheck: message.contains("mkntfs")
+                    )
+                    completion?(false)
+                }
+            }
+        }
+    }
+
+    // MARK: - System Readiness & Permissions Audit Operations
+
+    func auditSystemReadiness() {
+        readinessItems = readinessService.performAudit(selectedBackend: settings.preferredBackend)
+    }
+
+    func handleReadinessAction(_ actionType: ReadinessActionType) {
+        switch actionType {
+        case .openPrivacySecurity:
+            readinessService.openPrivacySecurity()
+        case .openFullDiskAccess:
+            readinessService.openFullDiskAccess()
+        case .installDrivers:
+            installDriversAutomatically()
+        case .installFuseT:
+            installFuseTInTerminal()
+        case .switchToFuseT:
+            settings.preferredBackend = .fuseT
+            refreshBackendStatus()
+            auditSystemReadiness()
+        case .refresh:
+            refreshBackendStatus()
+            auditSystemReadiness()
+        }
+    }
+
+    func installFuseTInTerminal() {
+        let script = "brew install --cask mac-fuse-t/homebrew-cask/fuse-t && brew install gromgit/fuse/ntfs-3g-mac"
+        let appleScript = """
+        tell application "Terminal"
+            activate
+            do script "\(script)"
+        end tell
+        """
+        if let scriptObj = NSAppleScript(source: appleScript) {
+            var errorInfo: NSDictionary?
+            scriptObj.executeAndReturnError(&errorInfo)
         }
     }
 }

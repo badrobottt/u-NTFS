@@ -12,6 +12,11 @@ struct SettingsView: View {
                     Label("General", systemImage: "gearshape")
                 }
 
+            readinessTab
+                .tabItem {
+                    Label("System & Permissions", systemImage: "checkmark.shield")
+                }
+
             backendTab
                 .tabItem {
                     Label("Filesystem Engine", systemImage: "externaldrive.badge.timemachine")
@@ -22,8 +27,14 @@ struct SettingsView: View {
                     Label("Security & Logs", systemImage: "lock.shield")
                 }
         }
-        .frame(width: 540, height: 420)
+        .frame(width: 580, height: 480)
         .padding(8)
+    }
+
+    // MARK: - Readiness Tab
+
+    private var readinessTab: some View {
+        SystemReadinessView(viewModel: viewModel, isPresentedAsSheet: false)
     }
 
     // MARK: - General Tab
@@ -43,8 +54,7 @@ struct SettingsView: View {
                 Toggle("Show non-NTFS external volumes (exFAT, FAT32, APFS)", isOn: Binding(
                     get: { viewModel.settings.showNonNTFSVolumes },
                     set: { newValue in
-                        viewModel.settings.showNonNTFSVolumes = newValue
-                        viewModel.refreshDisks()
+                        viewModel.toggleShowNonNTFS(newValue)
                     }
                 ))
             }
@@ -67,15 +77,13 @@ struct SettingsView: View {
 
     private var backendTab: some View {
         Form {
-            Section("Preferred NTFS Filesystem Backend") {
+            Section("Active Engine Architecture") {
                 Picker("Backend Engine", selection: $viewModel.settings.preferredBackend) {
                     ForEach(FilesystemBackendType.allCases) { backend in
                         Text(backend.displayName).tag(backend)
                     }
                 }
-                .onChange(of: viewModel.settings.preferredBackend) { _, _ in
-                    viewModel.refreshBackendStatus()
-                }
+                .pickerStyle(.radioGroup)
 
                 Text(viewModel.settings.preferredBackend.summary)
                     .font(.caption)

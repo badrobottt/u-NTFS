@@ -78,6 +78,9 @@ struct DiskDetailView: View {
                 .frame(minWidth: 720, minHeight: 520)
             }
         }
+        .sheet(isPresented: $viewModel.isShowingFormatSheet) {
+            FormatDiskSheetView(disk: disk, viewModel: viewModel)
+        }
         .confirmationDialog(
             "Safely eject \(disk.name)?",
             isPresented: $isConfirmingEject,
@@ -193,6 +196,14 @@ struct DiskDetailView: View {
             }
 
             Spacer()
+
+            Button(role: .destructive) {
+                viewModel.isShowingFormatSheet = true
+            } label: {
+                Label("Format NTFS…", systemImage: "eraser.line.dashed")
+            }
+            .buttonStyle(.bordered)
+            .disabled(viewModel.isBusy)
 
             Button(role: .destructive) {
                 isConfirmingEject = true

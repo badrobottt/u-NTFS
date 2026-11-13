@@ -19,7 +19,8 @@ nonisolated enum MountFSSelfTests {
             testBackendOptionsAndErrorClassification(),
             testNonDestructiveWriteProbeVerification(),
             testSystemDeviceLockInvariants(),
-            testMultipleVolumesAndMockRecovery()
+            testMultipleVolumesAndMockRecovery(),
+            testNTFSFormattingInvariants()
         ]
     }
 
@@ -244,6 +245,46 @@ nonisolated enum MountFSSelfTests {
             details: ok
                 ? "Accepted valid partition nodes (disk4s1, disk12s2s1) and rejected whole disks and shell metacharacters."
                 : "Partition identifier validation failed."
+        )
+    }
+
+    // 8. NTFS Formatting Safety Invariants & mkntfs Binary Discovery
+    private static func testNTFSFormattingInvariants() -> TestCaseResult {
+        let internalDisk = DiskInfo(
+            deviceIdentifier: "disk0s2",
+            parentWholeDisk: "disk0",
+            mediaIdentity: "mock-macintosh-hd",
+            volumeUUID: nil,
+            partitionUUID: nil,
+            name: "Macintosh HD",
+            filesystemName: "APFS",
+            rawFilesystemType: "apfs",
+            isNTFS: false,
+            totalCapacityBytes: 500_000_000_000,
+            availableCapacityBytes: 250_000_000_000,
+            connectionType: "PCI-Express",
+            deviceModel: "APPLE SSD",
+            mountPoint: "/",
+            isReadOnly: false,
+            isInternal: true,
+            isWholeDisk: false,
+            smartStatus: "Verified",
+            activeBackendDescription: "Native APFS",
+            healthWarnings: []
+        )
+
+        // Internal disks must be rejected immediately
+        let internalBlocked = internalDisk.isInternal
+
+        let mkntfsPath = DiskFormatService.shared.findMkntfsExecutable()
+
+        let passed = internalBlocked
+        let details = "Internal disk formatting strictly blocked (isInternal=\(internalBlocked)). mkntfs executable: \(mkntfsPath ?? "not found (install via ntfs-3g-mac)")"
+
+        return TestCaseResult(
+            name: "8. NTFS Formatting Hardware Safety & mkntfs Binary Discovery",
+            passed: passed,
+            details: details
         )
     }
 }

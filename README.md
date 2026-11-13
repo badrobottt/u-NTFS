@@ -8,6 +8,10 @@
 
 - **Real-Time Disk Discovery**: Automatically detects connected external storage devices using `DiskArbitration`, `IOKit`, and kernel mount table inspection (`getmntinfo`).
 - **Genuine Finder Read/Write Integration**: Remounts read-only NTFS volumes in Read/Write mode so you can create, copy, move, rename, and delete files directly in macOS Finder.
+- **Native Windows NTFS Formatting**:
+  - Format external USB drives and partitions to Windows NTFS directly within the app using `mkntfs`.
+  - Supports **Quick Format** (reinitializes MFT and boot sector in seconds) and **Whole-Disk MBR Erase** (creates a clean Master Boot Record partition scheme with a 100% NTFS volume, ideal for USB sticks).
+  - Strict hardware safety invariants block formatting of internal macOS system drives.
 - **CrystalDiskInfo Telemetry & S.M.A.R.T. Inspector**:
   - Live Celsius & Fahrenheit disk temperature readings.
   - Overall health status indicator (`GOOD`, `CAUTION`, `BAD`) with SSD life percentage.
@@ -26,10 +30,10 @@
   - **Non-Destructive Write Probe**: Confirms genuine write capability after remounting without altering user files.
 - **Desktop Dashboard & Menu Bar Extra**:
   - Detailed volume inspection (capacity usage, BSD device identifier, UUID, filesystem type, connection bus, S.M.A.R.T. status, and mount point).
-  - Quick one-click **Mount Writable**, **Remount Read-Only**, **Unmount**, **Eject**, and **Open in Finder** actions from both the main window and the macOS menu bar.
+  - Quick one-click **Mount Writable**, **Remount Read-Only**, **Unmount**, **Eject**, **Format as NTFS**, and **Open in Finder** actions from both the main window and the macOS menu bar.
 - **Automatic Driver & Tool Installer**: One-click in-app background installation for Homebrew, macFUSE, ntfs-3g-mac, and smartmontools.
 - **Touch ID / Admin Authorization**: Supports biometric confirmation (`LocalAuthentication`) and standard macOS privilege elevation without ever storing passwords.
-- **Built-in Diagnostics & Self-Test Suite**: Includes an interactive 7-stage verification suite and live `OSLog` diagnostic viewer.
+- **Built-in Diagnostics & Self-Test Suite**: Includes an interactive 8-stage verification suite and live `OSLog` diagnostic viewer.
 
 ---
 
@@ -73,7 +77,7 @@ u-NTFS/
 ├── Filesystem/
 │   ├── mountfs.sh                 # Reference shell implementation from guoquan/mountfs
 │   ├── MountFSEngine.swift         # Core disk validation, IOKit registry pinning, and lock engine
-│   ├── MountFSSelfTests.swift      # Self-test validation suite for safety invariants
+│   ├── MountFSSelfTests.swift      # 8-stage self-test validation suite for safety invariants
 │   └── NTFSBackendAdapter.swift    # Driver path resolution and mount option builder
 ├── Models/
 │   ├── DiskHealthInfo.swift        # CrystalDiskInfo health, temperature, and SMART attributes model
@@ -82,6 +86,7 @@ u-NTFS/
 │   └── VolumeStatus.swift          # Transaction steps, mount state, and health warnings
 ├── Services/
 │   ├── AuthorizationService.swift  # Privileged Helper Tool & Touch ID authorization
+│   ├── DiskFormatService.swift     # Low-level mkntfs formatting and whole-disk MBR repartitioning
 │   ├── DiskHealthService.swift     # Multi-tier telemetry (IOKit + diskutil + smartctl)
 │   ├── DiskMonitoringService.swift # Real-time DiskArbitration event stream
 │   ├── LoggingService.swift        # Centralized OSLog and in-memory audit logs
@@ -95,6 +100,7 @@ u-NTFS/
     ├── DashboardView.swift         # Split-view main window with sidebar and toolbar
     ├── DiskDetailView.swift        # Detailed volume metrics, actions, and inspector
     ├── DiskHealthView.swift        # CrystalDiskInfo-style health, temperature, and SMART telemetry view
+    ├── FormatDiskSheetView.swift   # Windows NTFS partition/disk formatting dialog
     ├── MenuBarView.swift           # Compact macOS MenuBarExtra popover interface
     ├── SettingsView.swift          # Driver status, preferences, and self-tests
     └── StatusComponents.swift      # Reusable status badges and diagnostic sheets
@@ -117,7 +123,8 @@ If you find **u-NTFS** useful for your daily workflow, consider sponsoring the p
 
 - **No Stored Passwords**: Administrator privileges are requested on-demand through standard macOS authorization mechanisms; credentials are never cached or written to disk.
 - **Dirty Volume Detection**: Detects Windows Hibernate / Fast Startup (`hiberfil.sys`) or unclean NTFS journals and safely falls back to read-only mounting with clear recovery instructions (`chkdsk /f`) rather than risking filesystem corruption.
-- **Bounded Process Execution**: External `diskutil` and `ntfs-3g` processes run inside isolated process groups with strict timeouts.
+- **Hardware-Level Format Safeguards**: Prevents formatting of internal system disks, APFS containers, and EFI partitions.
+- **Bounded Process Execution**: External `diskutil`, `ntfs-3g`, and `mkntfs` processes run inside isolated process groups with strict timeouts.
 
 ---
 

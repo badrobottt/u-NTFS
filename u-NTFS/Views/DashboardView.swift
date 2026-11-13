@@ -17,6 +17,18 @@ struct DashboardView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
+                    viewModel.isShowingReadinessSheet = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: viewModel.overallReadinessStatus.iconName)
+                            .foregroundStyle(viewModel.overallReadinessStatus.badgeColor)
+                        Text(viewModel.overallReadinessStatus.isReady ? "Ready" : "System Status")
+                            .font(.caption.weight(.medium))
+                    }
+                }
+                .help("View system readiness, driver installations, and security approvals")
+
+                Button {
                     viewModel.refreshAll()
                 } label: {
                     Label("Refresh Volumes", systemImage: "arrow.clockwise")
@@ -39,6 +51,9 @@ struct DashboardView: View {
                 }
                 .help("Configure automatic NTFS mounting, backend engine, and security")
             }
+        }
+        .sheet(isPresented: $viewModel.isShowingReadinessSheet) {
+            SystemReadinessView(viewModel: viewModel, isPresentedAsSheet: true)
         }
         .sheet(isPresented: $viewModel.isShowingDiagnosticsSheet) {
             DiagnosticsSheetView(viewModel: viewModel)
@@ -82,8 +97,7 @@ struct DashboardView: View {
                 Toggle("Show Non-NTFS", isOn: Binding(
                     get: { viewModel.settings.showNonNTFSVolumes },
                     set: { newValue in
-                        viewModel.settings.showNonNTFSVolumes = newValue
-                        viewModel.refreshDisks()
+                        viewModel.toggleShowNonNTFS(newValue)
                     }
                 ))
                 .toggleStyle(.switch)
@@ -120,32 +134,36 @@ struct DashboardView: View {
 
             Divider()
 
-            // Compact footer showing active backend engine & status
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(viewModel.backendEnvironment.isSelectedBackendReady ? Color.green : Color.orange)
-                    .frame(width: 8, height: 8)
+            // Compact footer showing active backend engine & readiness checklist shortcut
+            Button {
+                viewModel.isShowingReadinessSheet = true
+            } label: {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(viewModel.overallReadinessStatus.badgeColor)
+                        .frame(width: 8, height: 8)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(viewModel.settings.preferredBackend.shortName)
-                        .font(.caption.weight(.semibold))
-                    Text(viewModel.backendEnvironment.hasNTFS3G ? "ntfs-3g detected" : "ntfs-3g missing")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(viewModel.settings.preferredBackend.shortName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(viewModel.overallReadinessStatus.statusTitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                 }
-
-                Spacer()
-
-                Button {
-                    viewModel.runInstallationCheckAndShowSheet()
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .buttonStyle(.plain)
-                .help("Check NTFS driver & backend installation")
+                .padding(12)
+                .contentShape(Rectangle())
             }
-            .padding(12)
+            .buttonStyle(.plain)
             .background(.bar)
+            .help("View system readiness, driver installations, and security approvals")
         }
     }
 
@@ -153,26 +171,6 @@ struct DashboardView: View {
 
     private var detailContent: some View {
         VStack(spacing: 0) {
-            BackendReadinessCard(
-                status: viewModel.backendEnvironment,
-                isInstallingDrivers: viewModel.isInstallingDrivers,
-                installProgressText: viewModel.driverInstallProgressText,
-                onInstallDrivers: {
-                    viewModel.installDriversAutomatically()
-                },
-                onInstallInTerminal: {
-                    viewModel.installDriversInTerminal()
-                },
-                onCheckInstallation: {
-                    viewModel.runInstallationCheckAndShowSheet()
-                },
-                onOpenFullDiskAccess: {
-                    viewModel.openFullDiskAccess()
-                }
-            )
-            .padding(.horizontal, 22)
-            .padding(.top, 16)
-
             if let selected = viewModel.selectedDisk {
                 DiskDetailView(disk: selected, viewModel: viewModel)
             } else {
