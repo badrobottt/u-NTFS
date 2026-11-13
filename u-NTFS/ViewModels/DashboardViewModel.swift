@@ -51,7 +51,7 @@ final class DashboardViewModel {
         case logs = "Activity Logs"
         case installation = "Driver & Backend"
         case scanReport = "Disk Scan Report"
-        case selfTests = "Engine Self-Tests"
+        case selfTests = "Self-Tests"
         var id: String { rawValue }
     }
 

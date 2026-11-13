@@ -248,7 +248,7 @@ struct DiagnosticsSheetView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 440)
+                .fixedSize()
             }
             .padding(16)
 
@@ -311,7 +311,7 @@ struct DiagnosticsSheetView: View {
             }
             .padding(14)
         }
-        .frame(minWidth: 720, minHeight: 480)
+        .frame(minWidth: 780, minHeight: 500)
     }
 
     private var selfTestsListView: some View {
