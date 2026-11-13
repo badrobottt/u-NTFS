@@ -39,6 +39,14 @@ struct SettingsView: View {
                 }
 
                 Toggle("Open volume in Finder after enabling write access", isOn: $viewModel.settings.openFinderAfterMount)
+
+                Toggle("Show non-NTFS external volumes (exFAT, FAT32, APFS)", isOn: Binding(
+                    get: { viewModel.settings.showNonNTFSVolumes },
+                    set: { newValue in
+                        viewModel.settings.showNonNTFSVolumes = newValue
+                        viewModel.refreshDisks()
+                    }
+                ))
             }
 
             Section("Startup & Menu Bar") {

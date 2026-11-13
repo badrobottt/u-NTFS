@@ -197,25 +197,34 @@ private struct MenuBarDiskCard: View {
             }
 
             HStack(spacing: 6) {
-                if !disk.isWritable {
-                    Button {
-                        viewModel.enableWriteAccess(for: disk)
-                    } label: {
-                        Label("Enable Write", systemImage: "lock.open.fill")
-                            .frame(maxWidth: .infinity)
+                if disk.isNTFS {
+                    if !disk.isWritable {
+                        Button {
+                            viewModel.enableWriteAccess(for: disk)
+                        } label: {
+                            Label("Enable Write", systemImage: "lock.open.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(viewModel.isBusy || disk.mediaIdentity == nil)
+                    } else {
+                        Button {
+                            viewModel.remountReadOnly(for: disk)
+                        } label: {
+                            Label("Read-Only", systemImage: "lock.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(viewModel.isBusy)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(viewModel.isBusy || disk.mediaIdentity == nil)
                 } else {
-                    Button {
-                        viewModel.remountReadOnly(for: disk)
-                    } label: {
-                        Label("Read-Only", systemImage: "lock.fill")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(viewModel.isBusy)
+                    Text(disk.filesystemName)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                 }
 
                 if disk.isMounted {

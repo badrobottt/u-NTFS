@@ -74,14 +74,36 @@ struct DashboardView: View {
 
     private var sidebarContent: some View {
         VStack(spacing: 0) {
+            HStack {
+                Label("Show Non-NTFS", systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("Show Non-NTFS", isOn: Binding(
+                    get: { viewModel.settings.showNonNTFSVolumes },
+                    set: { newValue in
+                        viewModel.settings.showNonNTFSVolumes = newValue
+                        viewModel.refreshDisks()
+                    }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.background.secondary.opacity(0.5))
+
+            Divider()
+
             List(selection: $viewModel.selectedDiskID) {
-                Section("External NTFS Drives (\(viewModel.disks.count))") {
+                Section(viewModel.settings.showNonNTFSVolumes ? "External Volumes (\(viewModel.disks.count))" : "External NTFS Volumes (\(viewModel.disks.count))") {
                     if viewModel.disks.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("No NTFS Drives Detected", systemImage: "externaldrive.badge.questionmark")
+                            Label(viewModel.settings.showNonNTFSVolumes ? "No Drives Detected" : "No NTFS Drives Detected", systemImage: "externaldrive.badge.questionmark")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.secondary)
-                            Text("Connect a USB or Thunderbolt NTFS drive. macOS mounts NTFS read-only by default; u-NTFS enables full Finder write access.")
+                            Text(viewModel.settings.showNonNTFSVolumes ? "Connect an external USB or Thunderbolt drive." : "Connect a USB or Thunderbolt NTFS drive. macOS mounts NTFS read-only by default; u-NTFS enables full Finder write access.")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
@@ -228,6 +250,14 @@ private struct SidebarDiskRow: View {
                     Text(disk.isMounted ? (disk.isReadOnly ? "Read-Only" : "Writable") : "Unmounted")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(disk.isWritable ? .green : (disk.isMounted ? .orange : .secondary))
+
+                    if !disk.isNTFS {
+                        Text("·")
+                            .foregroundStyle(.secondary)
+                        Text(disk.filesystemName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 

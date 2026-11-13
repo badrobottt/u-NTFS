@@ -31,6 +31,12 @@ nonisolated public struct DiskMetadata: Equatable, Sendable {
 
     public var isMounted: Bool { mountPoint != nil }
 
+    public var isExternalPartition: Bool {
+        guard isInternal == false && isWholeDisk == false else { return false }
+        guard let fs = filesystem, !fs.isEmpty else { return false }
+        return true
+    }
+
     public var isExternalNTFSPartition: Bool {
         filesystem == "ntfs" && isInternal == false && isWholeDisk == false
     }
@@ -55,6 +61,7 @@ nonisolated struct DiskInfo: Identifiable, Equatable, Hashable, Sendable {
     let name: String                      // Volume label or fallback BSD name
     let filesystemName: String            // "NTFS" or "NTFS (macFUSE / ntfs-3g)"
     let rawFilesystemType: String         // "ntfs", "macfuse", etc.
+    let isNTFS: Bool                      // true if NTFS partition, false for exFAT/APFS/FAT32/etc.
     let totalCapacityBytes: Int64
     let availableCapacityBytes: Int64
     let connectionType: String            // e.g. "USB", "Thunderbolt", "External"

@@ -136,9 +136,13 @@ final class DashboardViewModel {
         let currentIdentities = verifiedIdentities
         let generation = scanGeneration
         let service = volumeService
+        let includeNonNTFS = settings.showNonNTFSVolumes
 
         Task.detached(priority: .utility) {
-            let scanResult = service.scanExternalNTFSVolumes(verifiedIdentities: currentIdentities)
+            let scanResult = service.scanExternalNTFSVolumes(
+                verifiedIdentities: currentIdentities,
+                includeNonNTFS: includeNonNTFS
+            )
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isScanning = false
@@ -151,9 +155,17 @@ final class DashboardViewModel {
                         self.selectedDiskID = self.disks.first?.id
                     }
                     if self.disks.isEmpty {
-                        self.statusSummary = "No external NTFS drives connected"
+                        self.statusSummary = self.settings.showNonNTFSVolumes
+                            ? "No external drives connected"
+                            : "No external NTFS drives connected"
                     } else {
-                        self.statusSummary = "\(self.disks.count) external NTFS volume(s) · \(self.writableCount) writable"
+                        let ntfsCount = self.disks.filter { $0.isNTFS }.count
+                        let nonNTFSCount = self.disks.count - ntfsCount
+                        if nonNTFSCount > 0 {
+                            self.statusSummary = "\(ntfsCount) NTFS, \(nonNTFSCount) other volume(s) · \(self.writableCount) writable"
+                        } else {
+                            self.statusSummary = "\(self.disks.count) external NTFS volume(s) · \(self.writableCount) writable"
+                        }
                     }
 
                     if triggerAutoMountIfNeeded && self.settings.autoMountNTFS && self.settings.defaultMountWritable {
@@ -169,7 +181,7 @@ final class DashboardViewModel {
 
     private func evaluateAutoMountCandidates() {
         guard !isBusy, backendEnvironment.isSelectedBackendReady else { return }
-        for disk in disks where disk.isReadOnly && disk.mediaIdentity != nil {
+        for disk in disks where disk.isNTFS && disk.isReadOnly && disk.mediaIdentity != nil {
             guard let identity = disk.mediaIdentity, !autoMountedIdentities.contains(identity) else { continue }
             autoMountedIdentities.insert(identity)
             logging.log("Auto-mounting newly connected NTFS volume \(disk.name) (\(disk.deviceIdentifier))", level: .notice, category: "AutoMount")
@@ -182,6 +194,17 @@ final class DashboardViewModel {
 
     func enableWriteAccess(for disk: DiskInfo) {
         guard !isBusy else { return }
+        guard disk.isNTFS else {
+            statusSummary = "\(disk.name) is not an NTFS volume"
+            activeAlert = DashboardAlertItem(
+                title: "Not an NTFS Volume",
+                message: "\(disk.name) is formatted as \(disk.filesystemName). Read/Write mounting via ntfs-3g is only designed for NTFS partitions.",
+                detailedLog: "Device: /dev/\(disk.deviceIdentifier)\nDetected Filesystem: \(disk.filesystemName) (\(disk.rawFilesystemType))",
+                offerFullDiskAccess: false,
+                offerInstallCheck: false
+            )
+            return
+        }
         guard disk.mediaIdentity != nil else {
             activeAlert = DashboardAlertItem(
                 title: "Hardware Identity Unavailable",

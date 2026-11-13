@@ -53,6 +53,10 @@ final class SettingsViewModel {
         }
     }
 
+    var showNonNTFSVolumes: Bool {
+        didSet { defaults.set(showNonNTFSVolumes, forKey: Keys.showNonNTFSVolumes) }
+    }
+
     var launchAtLoginStatusDescription: String = "Standard App Session"
 
     private enum Keys {
@@ -66,6 +70,7 @@ final class SettingsViewModel {
         static let requireBiometricConfirmation = "touchIDForHelper"
         static let enableNotifications = "mountfs.enableNotifications"
         static let enableDiagnosticLogging = "mountfs.enableDiagnosticLogging"
+        static let showNonNTFSVolumes = "mountfs.showNonNTFSVolumes"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -80,7 +85,8 @@ final class SettingsViewModel {
             Keys.openFinderAfterMount: true,
             Keys.requireBiometricConfirmation: false,
             Keys.enableNotifications: true,
-            Keys.enableDiagnosticLogging: true
+            Keys.enableDiagnosticLogging: true,
+            Keys.showNonNTFSVolumes: false
         ])
 
         self.autoMountNTFS = defaults.bool(forKey: Keys.autoMountNTFS)
@@ -94,6 +100,7 @@ final class SettingsViewModel {
         self.requireBiometricConfirmation = defaults.bool(forKey: Keys.requireBiometricConfirmation)
         self.enableNotifications = defaults.bool(forKey: Keys.enableNotifications)
         self.enableDiagnosticLogging = defaults.bool(forKey: Keys.enableDiagnosticLogging)
+        self.showNonNTFSVolumes = defaults.bool(forKey: Keys.showNonNTFSVolumes)
         refreshLaunchAtLoginStatus()
     }
 

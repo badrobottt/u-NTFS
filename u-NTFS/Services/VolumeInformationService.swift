@@ -9,9 +9,15 @@ nonisolated struct DiskScanResult: Equatable, Sendable {
 
 /// Protocol for discovering and inspecting external NTFS volumes.
 protocol VolumeInformationServicing: Sendable {
-    nonisolated func scanExternalNTFSVolumes(verifiedIdentities: [String: String]) -> DiskScanResult?
+    nonisolated func scanExternalNTFSVolumes(verifiedIdentities: [String: String], includeNonNTFS: Bool) -> DiskScanResult?
     nonisolated func inspectSingleDisk(device: String, verifiedIdentities: [String: String]) -> DiskInfo?
     nonisolated func rawDiskutilInfo(for device: String) -> [String: Any]?
+}
+
+extension VolumeInformationServicing {
+    nonisolated func scanExternalNTFSVolumes(verifiedIdentities: [String: String]) -> DiskScanResult? {
+        scanExternalNTFSVolumes(verifiedIdentities: verifiedIdentities, includeNonNTFS: false)
+    }
 }
 
 /// Concrete implementation of `VolumeInformationServicing` combining `guoquan/mountfs` (`scanVolumes`,
@@ -35,7 +41,10 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
 
     /// Scans all attached disks using `diskutil list -plist`, `diskutil info -plist`,
     /// IOKit `IOMedia` registry identity, and Darwin kernel `getmntinfo` mount state.
-    nonisolated func scanExternalNTFSVolumes(verifiedIdentities: [String: String] = [:]) -> DiskScanResult? {
+    nonisolated func scanExternalNTFSVolumes(
+        verifiedIdentities: [String: String] = [:],
+        includeNonNTFS: Bool = false
+    ) -> DiskScanResult? {
         guard let list = diskDictionary(["list", "-plist"]),
               let allDisks = list["AllDisks"] as? [String] else {
             return nil
@@ -43,7 +52,7 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
 
         var report = [
             "u-NTFS — read-only disk scan",
-            "Scanned \(allDisks.count) disk identifiers."
+            "Scanned \(allDisks.count) disk identifiers (includeNonNTFS=\(includeNonNTFS))."
         ]
 
         var discovered: [DiskInfo] = []
@@ -62,11 +71,19 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
 
             let reportedFS = (info["FilesystemType"] as? String)?.lowercased()
             let reportedName = (info["FilesystemName"] as? String)?.lowercased() ?? ""
+            let contentHint = (info["Content"] as? String)?.lowercased() ?? ""
             let looksLikeNTFS = reportedFS == "ntfs"
                 || reportedName.contains("ntfs")
                 || isVerifiedNTFS
 
-            let state: [String: Any]? = (externalPartition && looksLikeNTFS)
+            // Skip system/EFI/container utility partitions when showing non-NTFS external drives
+            let isSystemUtilityPartition = contentHint == "efi"
+                || contentHint.contains("apple_apfs_isc")
+                || contentHint.contains("apple_apfs_recovery")
+                || reportedFS == "apfs_isc"
+
+            let shouldInspectKernelMount = externalPartition && (looksLikeNTFS || (includeNonNTFS && !isSystemUtilityPartition))
+            let state: [String: Any]? = shouldInspectKernelMount
                 ? MountFSEngine.mountState(device)
                 : nil
 
@@ -89,7 +106,9 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
                 "\(device): \(metadata.exclusionReason); mounted=\(metadata.isMounted); readOnly=\(metadata.readOnly); DiskUUID=\(hasPartitionUUID ? "present" : "missing"); VolumeUUID=\(hasVolumeUUID ? "present" : "missing")"
             )
 
-            guard metadata.isExternalNTFSPartition else { continue }
+            let shouldInclude = metadata.isExternalNTFSPartition
+                || (includeNonNTFS && metadata.isExternalPartition && !isSystemUtilityPartition)
+            guard shouldInclude else { continue }
 
             let stableIdentity = (scannedIdentity != nil && MountFSEngine.mediaIdentity(device) == scannedIdentity)
                 ? scannedIdentity
@@ -105,7 +124,7 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
             discovered.append(diskInfo)
         }
 
-        report.append("Included \(discovered.count) external NTFS partition(s).")
+        report.append("Included \(discovered.count) external partition(s).")
         return DiskScanResult(disks: discovered, report: report.joined(separator: "\n"))
     }
 
@@ -118,7 +137,7 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
         let isVerifiedNTFS = verifiedIdentities[device] != nil && scannedIdentity == verifiedIdentities[device]
         let state = MountFSEngine.mountState(device)
         let metadata = DiskMetadata(info, mountState: state, verifiedNTFS: isVerifiedNTFS)
-        guard metadata.isExternalNTFSPartition else { return nil }
+        guard metadata.isExternalPartition else { return nil }
         return buildDiskInfo(
             device: device,
             info: info,
@@ -165,18 +184,35 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
             }
         }
 
-        let kernelFSType = (kernelMountState?["FilesystemType"] as? String) ?? (metadata.reportedFilesystem ?? "ntfs")
+        let isNTFS = (metadata.filesystem == "ntfs")
+            || (metadata.reportedFilesystem?.lowercased() == "ntfs")
+            || ((info["FilesystemName"] as? String)?.lowercased().contains("ntfs") == true)
+
+        let kernelFSType = (kernelMountState?["FilesystemType"] as? String) ?? (metadata.reportedFilesystem ?? (isNTFS ? "ntfs" : "unknown"))
+        let filesystemName: String
         let activeBackendDescription: String
-        if !metadata.isMounted {
-            activeBackendDescription = "Not Mounted"
-        } else if metadata.readOnly {
-            activeBackendDescription = "macOS Built-in NTFS (Read-Only)"
-        } else if kernelFSType.contains("macfuse") || kernelFSType.contains("fuse") {
-            activeBackendDescription = "macFUSE + ntfs-3g (Read/Write)"
-        } else if kernelFSType.contains("fskit") {
-            activeBackendDescription = "Apple FSKit + ntfs-3g (Read/Write)"
+
+        if isNTFS {
+            filesystemName = metadata.readOnly ? "Windows NT File System (NTFS)" : "NTFS (Read/Write via ntfs-3g)"
+            if !metadata.isMounted {
+                activeBackendDescription = "Not Mounted"
+            } else if metadata.readOnly {
+                activeBackendDescription = "macOS Built-in NTFS (Read-Only)"
+            } else if kernelFSType.contains("macfuse") || kernelFSType.contains("fuse") {
+                activeBackendDescription = "macFUSE + ntfs-3g (Read/Write)"
+            } else if kernelFSType.contains("fskit") {
+                activeBackendDescription = "Apple FSKit + ntfs-3g (Read/Write)"
+            } else {
+                activeBackendDescription = "ntfs-3g (\(kernelFSType) Read/Write)"
+            }
         } else {
-            activeBackendDescription = "ntfs-3g (\(kernelFSType) Read/Write)"
+            let userFacingFS = (info["FilesystemName"] as? String)
+                ?? (info["FilesystemType"] as? String)?.uppercased()
+                ?? "Non-NTFS"
+            filesystemName = userFacingFS
+            activeBackendDescription = metadata.isMounted
+                ? "\(userFacingFS) (\(metadata.readOnly ? "Read-Only" : "Read/Write Native"))"
+                : "Not Mounted"
         }
 
         // Clean display name if mounted under /Volumes/mountfs.diskNsM.XXXXXX
@@ -205,8 +241,9 @@ final class VolumeInformationService: VolumeInformationServicing, @unchecked Sen
             volumeUUID: volumeUUID,
             partitionUUID: partitionUUID,
             name: displayName,
-            filesystemName: metadata.readOnly ? "Windows NT File System (NTFS)" : "NTFS (Read/Write via ntfs-3g)",
+            filesystemName: filesystemName,
             rawFilesystemType: kernelFSType,
+            isNTFS: isNTFS,
             totalCapacityBytes: totalBytes,
             availableCapacityBytes: freeBytes,
             connectionType: connectionType,
